@@ -18,6 +18,8 @@ extern crate log;
 extern crate markup5ever;
 #[macro_use]
 extern crate mac;
+#[macro_use]
+extern crate lazy_static;
 
 pub use driver::{parse_document, parse_fragment, ParseOpts, Parser};
 pub use markup5ever::*;

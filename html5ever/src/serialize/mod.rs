@@ -8,6 +8,7 @@
 // except according to those terms.
 
 pub use markup5ever::serialize::{AttrRef, Serialize, Serializer, TraversalScope};
+use std::collections::HashSet;
 use std::default::Default;
 use std::io::{self, Write};
 
@@ -117,6 +118,52 @@ impl<Wr: Write> HtmlSerializer<Wr> {
     }
 }
 
+lazy_static! {
+    static ref ALLOWED_TAGS: HashSet<&'static str> = {
+        let mut s = HashSet::new();
+        s.insert("p");
+        s.insert("br");
+        s.insert("strong");
+        s.insert("em");
+        s.insert("del");
+        s.insert("blockquote");
+        s.insert("code");
+        s.insert("pre");
+        s.insert("h1");
+        s.insert("h2");
+        s.insert("h3");
+        s.insert("h4");
+        s.insert("h5");
+        s.insert("h6");
+        s.insert("a");
+        s.insert("ul");
+        s.insert("ol");
+        s.insert("li");
+        s.insert("hr");
+        s
+    };
+}
+
+fn escape_text(text: &'static str, should_escape: bool) -> String {
+    if !should_escape {
+        return text.to_owned();
+    }
+
+    let mut result = String::new();
+    for c in text.chars() {
+        match c {
+            '&' => result += "&amp;",
+            '\u{00A0}' => result += "&nbsp;",
+            '"' => result += "&quot;",
+            '<' => result += "&lt;",
+            '>' => result += "&gt;",
+            c => result += &c.to_string(),
+        };
+    }
+
+    result
+}
+
 impl<Wr: Write> Serializer for HtmlSerializer<Wr> {
     fn start_elem<'a, AttrIter>(&mut self, name: QualName, attrs: AttrIter) -> io::Result<()>
     where
@@ -136,8 +183,11 @@ impl<Wr: Write> Serializer for HtmlSerializer<Wr> {
             return Ok(());
         }
 
-        try!(self.writer.write_all(b"<"));
-        try!(self.writer.write_all(tagname(&name).as_bytes()));
+        let tag = tagname(&name);
+        let escape = !ALLOWED_TAGS.contains(&*tag.to_owned());
+
+        try!(self.writer.write_all(escape_text("<", escape).as_bytes()));
+        try!(self.writer.write_all(tag.as_bytes()));
         for (name, value) in attrs {
             try!(self.writer.write_all(b" "));
 
@@ -148,42 +198,42 @@ impl<Wr: Write> Serializer for HtmlSerializer<Wr> {
                     if name.local != local_name!("xmlns") {
                         try!(self.writer.write_all(b"xmlns:"));
                     }
-                },
+                }
                 ns!(xlink) => try!(self.writer.write_all(b"xlink:")),
                 ref ns => {
                     // FIXME(#122)
                     warn!("attr with weird namespace {:?}", ns);
                     try!(self.writer.write_all(b"unknown_namespace:"));
-                },
+                }
             }
 
             try!(self.writer.write_all(name.local.as_bytes()));
-            try!(self.writer.write_all(b"=\""));
+            try!(self.writer.write_all(escape_text("=\"", escape).as_bytes()));
             try!(self.write_escaped(value, true));
-            try!(self.writer.write_all(b"\""));
+            try!(self.writer.write_all(escape_text("\"", escape).as_bytes()));
         }
-        try!(self.writer.write_all(b">"));
+        try!(self.writer.write_all(escape_text(">", escape).as_bytes()));
 
-        let ignore_children = name.ns == ns!(html) &&
-            match name.local {
-                local_name!("area") |
-                local_name!("base") |
-                local_name!("basefont") |
-                local_name!("bgsound") |
-                local_name!("br") |
-                local_name!("col") |
-                local_name!("embed") |
-                local_name!("frame") |
-                local_name!("hr") |
-                local_name!("img") |
-                local_name!("input") |
-                local_name!("keygen") |
-                local_name!("link") |
-                local_name!("meta") |
-                local_name!("param") |
-                local_name!("source") |
-                local_name!("track") |
-                local_name!("wbr") => true,
+        let ignore_children = name.ns == ns!(html)
+            && match name.local {
+                local_name!("area")
+                | local_name!("base")
+                | local_name!("basefont")
+                | local_name!("bgsound")
+                | local_name!("br")
+                | local_name!("col")
+                | local_name!("embed")
+                | local_name!("frame")
+                | local_name!("hr")
+                | local_name!("img")
+                | local_name!("input")
+                | local_name!("keygen")
+                | local_name!("link")
+                | local_name!("meta")
+                | local_name!("param")
+                | local_name!("source")
+                | local_name!("track")
+                | local_name!("wbr") => true,
                 _ => false,
             };
 
@@ -204,27 +254,30 @@ impl<Wr: Write> Serializer for HtmlSerializer<Wr> {
             None if self.opts.create_missing_parent => {
                 warn!("missing ElemInfo, creating default.");
                 Default::default()
-            },
+            }
             _ => panic!("no ElemInfo"),
         };
         if info.ignore_children {
             return Ok(());
         }
 
-        try!(self.writer.write_all(b"</"));
-        try!(self.writer.write_all(tagname(&name).as_bytes()));
-        self.writer.write_all(b">")
+        let tag = tagname(&name);
+        let escape = !ALLOWED_TAGS.contains(&*tag.to_owned());
+
+        try!(self.writer.write_all(escape_text("</", escape).as_bytes()));
+        try!(self.writer.write_all(tag.as_bytes()));
+        self.writer.write_all(escape_text(">", escape).as_bytes())
     }
 
     fn write_text(&mut self, text: &str) -> io::Result<()> {
         let escape = match self.parent().html_name {
-            Some(local_name!("style")) |
-            Some(local_name!("script")) |
-            Some(local_name!("xmp")) |
-            Some(local_name!("iframe")) |
-            Some(local_name!("noembed")) |
-            Some(local_name!("noframes")) |
-            Some(local_name!("plaintext")) => false,
+            Some(local_name!("style"))
+            | Some(local_name!("script"))
+            | Some(local_name!("xmp"))
+            | Some(local_name!("iframe"))
+            | Some(local_name!("noembed"))
+            | Some(local_name!("noframes"))
+            | Some(local_name!("plaintext")) => false,
 
             Some(local_name!("noscript")) => !self.opts.scripting_enabled,
 
